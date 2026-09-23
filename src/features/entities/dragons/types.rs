@@ -102,11 +102,12 @@ async fn abilities(ctx: &mut Ctx<'_>) -> Result<()> {
                     .and_then(|u| u.get("stars"))
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
-                let affordable = d.star_frags as f64 >= cost;
+                let potion = ctx.st.player.potion;
+                let affordable = potion >= cost;
                 let allowed = if unlocked {
                     affordable
                 } else {
-                    lvl as f64 >= gate_lvl && d.star_frags as f64 >= gate_stars
+                    lvl as f64 >= gate_lvl && d.rarity as f64 >= gate_stars
                 };
                 if allowed {
                     pick = Some((d.id, key.to_string(), d.name.clone()));
@@ -136,15 +137,23 @@ async fn abilities(ctx: &mut Ctx<'_>) -> Result<()> {
         }
     }
     if done == 0 {
-        let frags: i64 = ctx.st.dragons.iter().map(|d| d.star_frags).sum();
         let need = ctx
             .st
-            .isl_num(&["frag", "ladder"])
-            .map(|_| 0.0)
-            .unwrap_or(0.0);
-        let _ = need;
-        if frags > 0 {
-            logger::skip("dragon", &format!("{} star fragments, gates not met", frags));
+            .dragons
+            .iter()
+            .flat_map(|d| d.isl_abils.iter())
+            .filter(|a| a.get("unlocked").and_then(|v| v.as_bool()).unwrap_or(false))
+            .filter_map(|a| a.get("nextCost").and_then(|v| v.as_f64()))
+            .fold(f64::MAX, f64::min);
+        if need.is_finite() && need > ctx.st.player.potion {
+            logger::skip(
+                "dragon",
+                &format!(
+                    "{} potions short of {}, the skills wait",
+                    logger::num(need - ctx.st.player.potion),
+                    logger::num(need)
+                ),
+            );
         }
     }
     Ok(())

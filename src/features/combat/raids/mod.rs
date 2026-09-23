@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::features::{pick_slots, session_of, slots_len, Ctx};
+use crate::features::{session_of, slots_len, Ctx};
 use crate::core::logger;
 
 pub async fn run(ctx: &mut Ctx<'_>) -> Result<()> {
@@ -85,22 +85,99 @@ async fn defense(ctx: &mut Ctx<'_>) -> Result<()> {
     Ok(())
 }
 
+struct Board {
+    p: f64,
+    bar: f64,
+    name: String,
+    session: Value,
+    ids: Vec<i64>,
+    foes: Vec<super::arena::sim::Unit>,
+}
+
+fn stakes(spec: &Value) -> (f64, f64) {
+    let pick = |k: &str| {
+        spec.get("stakes")
+            .and_then(|s| s.get(k))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+    };
+    (pick("win"), pick("lose"))
+}
+
+fn pct(x: f64) -> String {
+    format!("{:.0}%", x * 100.0)
+}
+
+fn signed(x: f64) -> String {
+    if x < 0.0 {
+        format!("-{}", logger::num(-x))
+    } else {
+        format!("+{}", logger::num(x))
+    }
+}
+
+fn raid_result(name: &str, p: f64, res: &crate::core::http::Res) -> String {
+    let won = res
+        .data
+        .get("result")
+        .and_then(|r| r.get("won"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let troph = res
+        .data
+        .get("rewards")
+        .or_else(|| res.data.get("result").and_then(|r| r.get("rewards")))
+        .and_then(|r| r.get("trophies"))
+        .and_then(|v| v.as_f64());
+    let delta = match troph {
+        Some(t) => format!(" {} trophies", signed(t)),
+        None => String::new(),
+    };
+    if won {
+        format!("beat {}, odds were {}{}, {}", name, pct(p), delta, loot_of(res))
+    } else {
+        format!("lost to {} at odds {}{}", name, pct(p), delta)
+    }
+}
+
 async fn search(ctx: &mut Ctx<'_>) -> Result<()> {
     let fee = ctx.st.isl_num(&["raid", "searchGold"]).unwrap_or(0.0);
     if ctx.st.player.gold < fee {
         logger::skip("raid", &format!("search costs {} gold", logger::num(fee)));
         return Ok(());
     }
-    let lim = ctx.atk_limit();
-    if ctx.st.free_dragons(lim, true).is_empty() {
+    let pool = super::arena::policy::candidates(ctx.st, ctx.atk_limit(), 7);
+    if pool.is_empty() {
         logger::skip("raid", "no dragon free to raid with");
         return Ok(());
     }
 
-    let ratio = super::arena::memory::ArenaMemory::load().ratio(ctx.cfg.raids.min_power_ratio);
+    let model = super::arena::sim::Model::load();
+    let calib = super::arena::model::Calib::load();
+    let runs = ctx.cfg.arena.sim_runs.max(40) as usize;
+    let tries = ctx.cfg.arena.max_rerolls.max(1);
+    let mut seen: Vec<i64> = Vec::new();
+    let mut best: Option<Board> = None;
+    let mut last: Option<Value> = None;
 
-    for _ in 0..3 {
-        let res = ctx.act("/island/raid/search", json!({})).await?;
+    for round in 0..tries {
+        if round > 0 && ctx.st.player.gold - fee < ctx.cfg.arena.gold_floor {
+            logger::skip(
+                "raid",
+                &format!(
+                    "a wider search costs {} gold and the floor holds {}, the look stops",
+                    logger::num(fee),
+                    logger::num(ctx.cfg.arena.gold_floor)
+                ),
+            );
+            break;
+        }
+        let body = if seen.is_empty() {
+            json!({})
+        } else {
+            json!({ "skip": seen })
+        };
+        let res = ctx.act("/island/raid/search", body).await?;
         if !res.ok {
             logger::skip("raid", &format!("search: {}", res.reason()));
             break;
@@ -109,43 +186,125 @@ async fn search(ctx: &mut Ctx<'_>) -> Result<()> {
             Some(s) => s,
             None => break,
         };
+        last = Some(session.clone());
         let n = slots_len(&res, 3);
-        let foes = crate::features::foes_of(&res);
-        let slots = pick_slots(ctx.st, &foes, n, true);
-        if slots.is_empty() {
-            let _ = ctx
-                .act("/island/battle/leave", json!({ "sessionId": session }))
-                .await;
-            logger::skip("raid", "no eligible dragon for this raid");
+        let spec = res.data.get("raid").cloned().unwrap_or(Value::Null);
+        let name = spec
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("a base")
+            .to_string();
+        let (win, lose) = stakes(&spec);
+        let bar = if win + lose > 0.0 {
+            lose / (win + lose)
+        } else {
+            0.5
+        };
+        if let Some(tid) = spec.get("tid").and_then(|v| v.as_i64()) {
+            seen.push(tid);
+        }
+        let foes_val = crate::features::foes_of(&res);
+        let foes = super::arena::sim::foe_units(&foes_val, n);
+        if foes.is_empty() {
             break;
         }
-        let (mine, theirs) = crate::features::team_score(ctx.st, &slots, &foes);
-        if theirs > 0.0 && mine < theirs * ratio {
-            let _ = ctx
-                .act("/island/battle/leave", json!({ "sessionId": session }))
-                .await;
-            logger::skip(
+        let seed = (crate::core::http::server_now_ms(ctx.st) as u64)
+            .wrapping_add((round as u64 + 1).wrapping_mul(7919));
+        let (p, ids) = match super::arena::policy::plan(
+            ctx.st, &pool, &foes, &model, &calib, n, runs, seed,
+        ) {
+            Some(pl) => (pl.p_sim, pl.ids),
+            None => (0.0, Vec::new()),
+        };
+        if best.as_ref().map(|b| p > b.p).unwrap_or(true) {
+            best = Some(Board {
+                p,
+                bar,
+                name: name.clone(),
+                session,
+                ids,
+                foes,
+            });
+        }
+        if p >= bar {
+            logger::ok(
                 "raid",
                 &format!(
-                    "base too strong: {} vs {}, left without fighting",
-                    logger::num(mine),
-                    logger::num(theirs)
+                    "{} taken, board falls {} of the time, needs {}",
+                    name,
+                    pct(p),
+                    pct(bar)
                 ),
             );
             break;
         }
-        let commit = ctx
-            .act(
-                "/island/raid/commit",
-                json!({ "sessionId": session, "slots": slots }),
-            )
-            .await?;
-        if commit.ok {
-            logger::ok("raid", &format!("base raided, {}", loot_of(&commit)));
-        } else {
-            logger::skip("raid", &format!("commit: {}", commit.reason()));
-            break;
+        logger::skip(
+            "raid",
+            &format!("{} odds {} under {}, rerolling", name, pct(p), pct(bar)),
+        );
+    }
+
+    let board = match best {
+        Some(b) => b,
+        None => {
+            logger::skip("raid", "the scouts came back with nothing");
+            return Ok(());
         }
+    };
+    let stand = last.clone().unwrap_or_else(|| board.session.clone());
+    if board.ids.is_empty() {
+        logger::skip("raid", "no eligible dragon for this raid, the board is dropped");
+        walk_away(ctx, stand).await?;
+        return Ok(());
+    }
+    if board.p < board.bar {
+        logger::skip(
+            "raid",
+            &format!(
+                "nothing clears {} in {} looks, best {} on {}, walking off",
+                pct(board.bar),
+                tries,
+                pct(board.p),
+                board.name
+            ),
+        );
+        walk_away(ctx, stand).await?;
+        return Ok(());
+    }
+    let ids = super::arena::policy::order_slots(ctx.st, &board.ids, &board.foes, &model);
+    let slots: Vec<Value> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| json!({ "slot": i, "id": id }))
+        .collect();
+    if slots.is_empty() {
+        logger::skip("raid", "no eligible dragon for this raid");
+        return Ok(());
+    }
+    let commit = ctx
+        .act(
+            "/island/raid/commit",
+            json!({ "sessionId": board.session, "slots": slots }),
+        )
+        .await?;
+    if !commit.ok {
+        logger::skip("raid", &format!("commit: {}", commit.reason()));
+        let s = last.clone().unwrap_or_else(|| board.session.clone());
+        walk_away(ctx, s).await?;
+        return Ok(());
+    }
+    logger::ok("raid", &raid_result(&board.name, board.p, &commit));
+    Ok(())
+}
+
+async fn walk_away(ctx: &mut Ctx<'_>, session: Value) -> Result<()> {
+    let res = ctx
+        .act("/island/battle/leave", json!({ "sessionId": session }))
+        .await?;
+    if res.ok {
+        logger::skip("raid", "walked off the board, the back button cuts no trophies");
+    } else {
+        logger::skip("raid", &format!("leave: {}", res.reason()));
     }
     Ok(())
 }

@@ -111,12 +111,71 @@ async fn assign_auto(ctx: &mut Ctx<'_>) -> Result<()> {
     Ok(())
 }
 
+fn guide_build(st: &crate::core::state::Snapshot) -> Option<String> {
+    let list = st.quest.get("main")?.as_array()?;
+    for q in list {
+        let guided = q.get("guided").and_then(|v| v.as_bool()).unwrap_or(false)
+            || q.get("guided").and_then(|v| v.as_f64()).unwrap_or(0.0) != 0.0;
+        if !guided
+            || q.get("claimed").and_then(|v| v.as_bool()).unwrap_or(false)
+            || q.get("done").and_then(|v| v.as_bool()).unwrap_or(false)
+        {
+            continue;
+        }
+        let go = q.get("go").and_then(|v| v.as_str()).unwrap_or("");
+        let spot = match go.strip_prefix("bld:") {
+            Some(s) => s,
+            None => return None,
+        };
+        return Some(match spot {
+            "residency" => "res".to_string(),
+            "hall" => "hall".to_string(),
+            other => other.to_string(),
+        });
+    }
+    None
+}
+
+fn guide_step(st: &crate::core::state::Snapshot) -> Option<String> {
+    let list = st.quest.get("main")?.as_array()?;
+    for q in list {
+        let guided = q.get("guided").and_then(|v| v.as_bool()).unwrap_or(false)
+            || q.get("guided").and_then(|v| v.as_f64()).unwrap_or(0.0) != 0.0;
+        if !guided
+            || q.get("claimed").and_then(|v| v.as_bool()).unwrap_or(false)
+            || q.get("done").and_then(|v| v.as_bool()).unwrap_or(false)
+        {
+            continue;
+        }
+        return Some(
+            q.get("go")
+                .and_then(|v| v.as_str())
+                .unwrap_or("the next step")
+                .to_string(),
+        );
+    }
+    None
+}
+
 async fn build(ctx: &mut Ctx<'_>) -> Result<()> {
     let types = ctx.st.isl_at(&["bld", "types"]);
     let table = match types.as_object() {
         Some(t) => t.clone(),
         None => return Ok(()),
     };
+    let want = guide_build(ctx.st);
+    // Every trade is refused with "follow the elder first" until the elder's current
+    // guided step is done. When that step is not a build, hold the trade instead of
+    // firing the whole table at a server that keeps saying no.
+    if want.is_none() {
+        if let Some(step) = guide_step(ctx.st) {
+            logger::skip(
+                "island",
+                &format!("elder wants {} first, the build trade waits", step),
+            );
+            return Ok(());
+        }
+    }
     let mut wanted: Vec<(String, i64, f64, f64, f64)> = Vec::new();
     for (kind, spec) in table.iter() {
         let up = spec.get("up").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -129,7 +188,14 @@ async fn build(ctx: &mut Ctx<'_>) -> Result<()> {
         let logs = cost.get("logs").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let gold = cost.get("gold").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let id = inst.map(|b| b.id).unwrap_or(0);
-        wanted.push((kind.clone(), id, gold, logs, if kind == "hall" { -1.0 } else { gold }));
+        let rank = if want.as_deref() == Some(kind.as_str()) {
+            -2.0
+        } else if kind == "hall" {
+            -1.0
+        } else {
+            gold
+        };
+        wanted.push((kind.clone(), id, gold, logs, rank));
     }
     wanted.sort_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -153,12 +219,14 @@ async fn build(ctx: &mut Ctx<'_>) -> Result<()> {
         if res.ok {
             waiting = 0;
             logger::ok("island", &format!("{} building started", kind));
+        } else if guided(&res) {
+            logger::skip(
+                "island",
+                &format!("{} waits on the elder line, the next trade is tried", kind),
+            );
+            continue;
         } else {
             logger::skip("island", &format!("build {}: {}", kind, res.reason()));
-            if guided(&res) {
-                logger::skip("island", "guided quest line first, building paused");
-                return Ok(());
-            }
             return Ok(());
         }
     }
@@ -238,11 +306,10 @@ async fn upgrade(ctx: &mut Ctx<'_>) -> Result<()> {
         if res.ok {
             waiting = 0;
             logger::ok("island", &format!("{} lvl {} to {} queued", kind, lvl, lvl + 1));
+        } else if guided(&res) {
+            continue;
         } else {
             logger::skip("island", &format!("upgrade {}: {}", kind, res.reason()));
-            if guided(&res) {
-                logger::skip("island", "guided quest line first, upgrading paused");
-            }
             return Ok(());
         }
     }

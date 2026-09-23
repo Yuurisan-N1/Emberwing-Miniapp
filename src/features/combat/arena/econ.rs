@@ -13,6 +13,10 @@ pub struct Econ {
     pub reroll_gold: f64,
     pub free_rerolls: f64,
     pub unr_loss_div: f64,
+    pub boost_atk: f64,
+    pub boost_shield: f64,
+    pub unr_boost_pct: f64,
+    pub shield_full_leagues: i64,
 }
 
 fn arr_at(v: Option<&Value>, i: usize, d: f64) -> f64 {
@@ -41,9 +45,57 @@ impl Econ {
             reroll_gold: arr_at(cfg.get("rerollGold"), i, 0.0),
             free_rerolls: cfg.get("passRerolls").and_then(|v| v.as_f64()).unwrap_or(0.0),
             unr_loss_div: cfg.get("unrLossDiv").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            boost_atk: boost_price(cfg, "atk"),
+            boost_shield: boost_price(cfg, "shield"),
+            unr_boost_pct: cfg
+                .get("unrBoostPct")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(100.0),
+            shield_full_leagues: cfg
+                .get("shieldFullLeagues")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as i64,
         }
     }
 
+    pub fn shield_worth(&self, league: i64, p: f64) -> f64 {
+        if p >= self.break_even() {
+            return 0.0;
+        }
+        let full = if league < self.shield_full_leagues {
+            self.trophy_loss
+        } else {
+            self.trophy_loss * 0.5
+        };
+        full
+    }
+
+    pub fn boost_price(&self, base: f64, unranked: bool) -> f64 {
+        if unranked {
+            (base * (self.unr_boost_pct / 100.0)).round().max(0.0)
+        } else {
+            base
+        }
+    }
+
+    pub fn horn_gain(&self, p: f64, p_horn: f64) -> f64 {
+        if p_horn <= p || p_horn < self.break_even() {
+            return 0.0;
+        }
+        (p_horn - p) * (self.trophy_win + self.trophy_loss)
+            + (self.win_gold - self.loss_gold) * p_horn
+            + self.loss_gold * p_horn
+    }
+}
+
+fn boost_price(cfg: &Value, kind: &str) -> f64 {
+    cfg.get("boosts")
+        .and_then(|b| b.get(kind))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+}
+
+impl Econ {
     pub fn trophy_ev(&self, p: f64) -> f64 {
         p * self.trophy_win - (1.0 - p) * self.trophy_loss
     }

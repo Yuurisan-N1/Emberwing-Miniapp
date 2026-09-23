@@ -170,6 +170,7 @@ pub struct RaidsCfg {
     #[serde(default = "yes")]
     pub defense: bool,
     #[serde(default = "default_edge")]
+    #[allow(dead_code)]
     pub min_power_ratio: f64,
 }
 

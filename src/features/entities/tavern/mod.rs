@@ -6,47 +6,71 @@ use crate::core::logger;
 
 pub async fn run(ctx: &mut Ctx<'_>) -> Result<()> {
     if !ctx.cfg.tavern.enabled {
-        let tickets = tickets_of(ctx, &ctx.cfg.tavern.kind);
-        if tickets > 0.0 {
-            logger::skip(
+        for kind in ["i", "d"] {
+            let tickets = tickets_of(ctx, kind);
+            if tickets > 0.0 {
+                logger::skip(
+                    "tavern",
+                    &format!(
+                        "{} {} tickets held, rolls disabled in config.json",
+                        logger::num(tickets),
+                        wire(kind)
+                    ),
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Both tickets are spendable: an islander hire is a worker and the elder line
+    // wants one assigned before it lets a single building go up, a dragon hire is a
+    // new fighter. Roll the configured kind first, then the other while it still holds a ticket.
+    let first = normalize(&ctx.cfg.tavern.kind);
+    let order: [&str; 2] = if first == "i" { ["i", "d"] } else { ["d", "i"] };
+    for kind in order {
+        let mut left = tickets_of(ctx, kind);
+        if left < 1.0 {
+            log_pity(ctx, kind);
+            continue;
+        }
+        let mut rolled = 0u32;
+        while rolled < ctx.cfg.tavern.max_rolls_per_cycle && left >= 1.0 {
+            let res = ctx
+                .act("/island/tavern/roll", json!({ "kind": wire(kind), "n": 1 }))
+                .await?;
+            if !res.ok {
+                logger::skip("tavern", &format!("roll: {}", res.reason()));
+                break;
+            }
+            rolled += 1;
+            logger::ok(
                 "tavern",
-                &format!("{} tickets held, rolls disabled in config.json", logger::num(tickets)),
+                &format!("{} hire, {}", wire(kind), prize_of(&res)),
             );
+            left = tickets_of(ctx, kind);
         }
-        return Ok(());
-    }
-
-    let kind = normalize(&ctx.cfg.tavern.kind);
-    let mut left = tickets_of(ctx, &kind);
-    if left < 1.0 {
-        log_pity(ctx, &kind);
-        return Ok(());
-    }
-
-    let mut rolled = 0u32;
-    while rolled < ctx.cfg.tavern.max_rolls_per_cycle && left >= 1.0 {
-        let res = ctx
-            .act("/island/tavern/roll", json!({ "kind": kind, "n": 1 }))
-            .await?;
-        if !res.ok {
-            logger::skip("tavern", &format!("roll: {}", res.reason()));
-            break;
+        if rolled == 0 {
+            log_pity(ctx, kind);
         }
-        rolled += 1;
-        logger::ok("tavern", &format!("{} hire, {}", kind, prize_of(&res)));
-        left = tickets_of(ctx, &kind);
-    }
-    if rolled == 0 {
-        log_pity(ctx, &kind);
     }
     Ok(())
 }
 
 fn normalize(kind: &str) -> String {
-    if kind.eq_ignore_ascii_case("i") {
+    if kind.eq_ignore_ascii_case("i") || kind.eq_ignore_ascii_case("worker") {
         "i".to_string()
     } else {
         "d".to_string()
+    }
+}
+
+/// The snapshot keeps the tavern tickets under `tav.i` / `tav.d`, but the roll endpoint
+/// only takes `worker` / `dragon` and answers `bad roll kind` to the short names.
+fn wire(kind: &str) -> &'static str {
+    if normalize(kind) == "i" {
+        "worker"
+    } else {
+        "dragon"
     }
 }
 
