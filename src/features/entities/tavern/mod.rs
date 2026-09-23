@@ -22,9 +22,6 @@ pub async fn run(ctx: &mut Ctx<'_>) -> Result<()> {
         return Ok(());
     }
 
-    // Both tickets are spendable: an islander hire is a worker and the elder line
-    // wants one assigned before it lets a single building go up, a dragon hire is a
-    // new fighter. Roll the configured kind first, then the other while it still holds a ticket.
     let first = normalize(&ctx.cfg.tavern.kind);
     let order: [&str; 2] = if first == "i" { ["i", "d"] } else { ["d", "i"] };
     for kind in order {
@@ -64,8 +61,6 @@ fn normalize(kind: &str) -> String {
     }
 }
 
-/// The snapshot keeps the tavern tickets under `tav.i` / `tav.d`, but the roll endpoint
-/// only takes `worker` / `dragon` and answers `bad roll kind` to the short names.
 fn wire(kind: &str) -> &'static str {
     if normalize(kind) == "i" {
         "worker"

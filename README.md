@@ -125,7 +125,13 @@ socks5://user:pass@host:port
 
 ## Running the Bot
 
-### Using run.sh (Linux / macOS / Termux)
+There are three ways to get the binary: build from source, download manually, or use the downloader script. Each has a different run path.
+
+---
+
+### Option A - Build from Source
+
+#### Using run.sh (Linux / macOS / Termux)
 
 `run.sh` builds and runs in one command. Make it executable first:
 
@@ -154,7 +160,7 @@ screen -r emberwing-bot
 tmux attach -t emberwing-bot
 ```
 
-### Using make (Linux / macOS)
+#### Using make (Linux / macOS)
 
 ```bash
 make release   # optimized release build
@@ -166,13 +172,15 @@ make clean     # remove all build artifacts
 make size      # show release binary size
 ```
 
-### Manual (all platforms)
+#### Manual cargo build
+
+Build the binary first:
 
 ```bash
 cargo build --release
 ```
 
-Then run:
+Then run depending on your platform:
 
 ```bash
 # Linux / macOS / Termux
@@ -184,37 +192,24 @@ Then run:
 
 ---
 
-## Download Prebuilt Binary
+### Option B - Download Manually from Releases
 
-If you do not want to build from source, prebuilt binaries are available two ways.
+Download the binary for your platform from:
+https://github.com/Yuurisan-N1/Emberwing-Miniapp/releases/latest
 
-### Option 1 - Downloader Script
-
-```bash
-pip install requests colorama
-python bot.py
-```
-
-The script shows a numbered menu with all available platforms. Enter the number for your platform and the binary downloads with a live progress bar, set to executable automatically on Linux and Android.
-
-### Option 2 - Manual Download
-
-Download the latest binaries from the Actions page:
-https://github.com/Yuurisan-N1/Emberwing-Miniapp/actions/workflows/build.yml
-
-Open the latest successful run and scroll to the Artifacts section. All binaries are retained for 90 days per build.
-
-| Artifact | Platform |
+| File | Platform |
 |---|---|
 | `emberwing-bot-linux-x86_64` | Linux x86_64 |
 | `emberwing-bot-linux-aarch64` | Linux ARM64 |
 | `emberwing-bot-linux-armv7` | Linux ARMv7 |
-| `emberwing-bot-windows-x86_64` | Windows x86_64 |
+| `emberwing-bot-windows-x86_64.exe` | Windows x86_64 |
 | `emberwing-bot-macos-aarch64` | macOS Apple Silicon |
 | `emberwing-bot-android-aarch64` | Android ARM64 (Termux) |
 | `emberwing-bot-android-armv7` | Android ARMv7 (Termux) |
 
-**Linux / macOS / Android after downloading:**
+Place the downloaded binary in the same folder as your `data.txt`, `proxy.txt`, and `config.json`, then make it executable and run it from that folder.
+
+**Linux / macOS / Android (Termux):**
 
 ```bash
 chmod +x emberwing-bot-linux-x86_64
@@ -226,6 +221,61 @@ chmod +x emberwing-bot-linux-x86_64
 ```bash
 .\emberwing-bot-windows-x86_64.exe
 ```
+
+---
+
+### Option C - Downloader Script
+
+The downloader script fetches the correct binary directly from the Releases page for your platform. The binary is saved inside the `downloader/` folder.
+
+Install the downloader dependencies first:
+
+```bash
+pip install requests colorama
+```
+
+Then run:
+
+```bash
+python downloader/bot.py
+```
+
+The script shows a numbered menu:
+
+```
+1. Linux x86_64
+2. Linux aarch64
+3. Linux armv7
+4. Android aarch64
+5. Android armv7
+6. macOS aarch64
+7. Windows x86_64
+```
+
+Enter the number for your platform. The binary downloads with a live progress bar and is set to executable automatically on Linux and Android. After the download finishes, move the binary and your config files together in the same folder, then run it:
+
+**Linux / macOS / Android (Termux) -- from inside downloader/:**
+
+```bash
+cd downloader
+./emberwing-bot-linux-x86_64
+```
+
+Or move the binary to where your config files are first:
+
+```bash
+mv downloader/emberwing-bot-linux-x86_64 .
+./emberwing-bot-linux-x86_64
+```
+
+**Windows:**
+
+```bash
+move downloader\emberwing-bot-windows-x86_64.exe .
+.\emberwing-bot-windows-x86_64.exe
+```
+
+
 
 ---
 
@@ -344,7 +394,10 @@ Emberwing-Miniapp/
 ├── build.rs                             # Build script (embeds icon into Windows binary)
 ├── Makefile                             # make targets: build, run, release, start, clean, size
 ├── run.sh                               # Run helper: direct, nohup, screen, tmux, logs, stop
-├── bot.py                               # Interactive downloader script (7 platforms)
+├── downloader/
+│   ├── bot.py                           # Interactive downloader script (7 platforms)
+│   └── utils/
+│       └── banner.py                    # Banner display on startup
 ├── config.json                          # Auto-generated on first run
 ├── data.txt                             # Single account initData
 └── proxy.txt                            # Proxy (optional)
