@@ -6,4 +6,4 @@
 /src/features/combat/arena/policy.rs
 /assets/sim_model.json
 /lab/
-/.github/
+/.github/__pycache__/
