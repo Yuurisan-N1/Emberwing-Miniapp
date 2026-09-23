@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+*.log
+/src/features/combat/arena/logic.rs
+/src/features/combat/arena/sim.rs
+/src/features/combat/arena/policy.rs
+/assets/sim_model.json
+/lab/

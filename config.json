@@ -1,0 +1,108 @@
+{
+  "loop_cycle": {
+    "enabled": true,
+    "sleep_seconds": 3600
+  },
+  "presence": {
+    "enabled": true
+  },
+  "welcome_dm": {
+    "enabled": false
+  },
+  "daily_gift": {
+    "enabled": true
+  },
+  "eggs": {
+    "enabled": true,
+    "merge": true,
+    "incubate": true,
+    "open_free": true
+  },
+  "dragons": {
+    "enabled": true,
+    "level_up": true,
+    "abilities": true,
+    "rarity_up": true
+  },
+  "island": {
+    "enabled": true,
+    "build": true,
+    "upgrade": true,
+    "collect": true,
+    "assign_auto": true,
+    "complete_jobs": true,
+    "den_collect": true
+  },
+  "villagers": {
+    "enabled": true,
+    "frag_upgrade": true
+  },
+  "arena": {
+    "enabled": true,
+    "reroll": true,
+    "max_rerolls": 12,
+    "unranked": false,
+    "max_fights_per_cycle": 10,
+    "min_power_ratio": 1.0,
+    "stop_after_losses": 1,
+    "probe_after_holds": 8,
+    "farm_unranked": true,
+    "gold_floor": 250,
+    "min_trophy_ev": 0,
+    "sim_runs": 160
+  },
+  "expeditions": {
+    "enabled": true,
+    "resource": "meat",
+    "hours": 6,
+    "attack": true,
+    "min_power_ratio": 1.15
+  },
+  "raids": {
+    "enabled": true,
+    "search": true,
+    "chest": true,
+    "defense": true,
+    "min_power_ratio": 1.15
+  },
+  "hunts": {
+    "enabled": true
+  },
+  "camps": {
+    "enabled": true
+  },
+  "monsters": {
+    "enabled": true
+  },
+  "areas": {
+    "enabled": true
+  },
+  "gear": {
+    "enabled": true,
+    "craft": true,
+    "equip": true,
+    "level_up": true,
+    "fuse": true
+  },
+  "quests": {
+    "enabled": true
+  },
+  "achievements": {
+    "enabled": true
+  },
+  "event": {
+    "enabled": true,
+    "claim_free": true
+  },
+  "pass": {
+    "enabled": true
+  },
+  "referrals": {
+    "enabled": true
+  },
+  "tavern": {
+    "enabled": true,
+    "kind": "d",
+    "max_rolls_per_cycle": 5
+  }
+}
