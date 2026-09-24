@@ -63,8 +63,6 @@ pub struct Toggle {
 pub struct LoopCycle {
     #[serde(default = "yes")]
     pub enabled: bool,
-    #[serde(default = "default_sleep")]
-    pub sleep_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -224,9 +222,6 @@ fn off() -> Toggle {
     Toggle { enabled: false }
 }
 
-fn default_sleep() -> u64 {
-    3600
-}
 
 fn default_rerolls() -> u32 {
     12
@@ -279,7 +274,6 @@ fn default_tav_rolls() -> u32 {
 fn default_loop() -> LoopCycle {
     LoopCycle {
         enabled: true,
-        sleep_seconds: default_sleep(),
     }
 }
 
@@ -388,7 +382,7 @@ fn default_tavern() -> TavernCfg {
 
 impl Config {
     pub fn sleep_seconds(&self) -> u64 {
-        self.loop_cycle.sleep_seconds.max(30)
+        1800
     }
 }
 
@@ -422,7 +416,7 @@ pub fn config_path() -> PathBuf {
 
 fn sample_config() -> serde_json::Value {
     serde_json::json!({
-        "loop_cycle": { "enabled": true, "sleep_seconds": 3600 },
+        "loop_cycle": { "enabled": true },
         "presence": { "enabled": true },
         "welcome_dm": { "enabled": false },
         "daily_gift": { "enabled": true },

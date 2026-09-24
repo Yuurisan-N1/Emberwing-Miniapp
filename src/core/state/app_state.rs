@@ -182,6 +182,8 @@ pub struct Dragon {
     #[serde(default)]
     pub star_frags: i64,
     #[serde(default)]
+    pub rented: i64,
+    #[serde(default)]
     pub hp_buf: f64,
     #[serde(default)]
     pub isl_lvl: i64,
@@ -578,11 +580,85 @@ impl Snapshot {
         d.used(self.atk_marker(), false) < lim
     }
 
-    pub fn free_dragons(&self, lim: f64, for_raid: bool) -> Vec<Dragon> {
+    pub fn arena_active(&self) -> std::collections::HashSet<i64> {
+        use std::collections::HashSet;
+        let slots = self.player.roost_slots.max(0) as usize;
+        let mut out: HashSet<i64> = HashSet::new();
+        if slots == 0 {
+            for d in self.dragons.iter() {
+                out.insert(d.id);
+            }
+            return out;
+        }
+        let mut owned = 0usize;
+        for d in self.dragons.iter() {
+            if d.rented != 0 {
+                out.insert(d.id);
+            } else if owned < slots {
+                out.insert(d.id);
+                owned += 1;
+            }
+        }
+        out
+    }
+
+    pub fn island_active(&self) -> std::collections::HashSet<i64> {
+        use std::collections::HashSet;
+        let slots = self.player.roost_slots.max(0) as usize;
+        let mut out: HashSet<i64> = HashSet::new();
+        if slots == 0 {
+            for d in self.dragons.iter() {
+                out.insert(d.id);
+            }
+            return out;
+        }
+        let mut groups: Vec<(String, Dragon)> = Vec::new();
+        for d in self.dragons.iter() {
+            if d.rented != 0 {
+                continue;
+            }
+            let key = format!("{}|{}", d.element, d.rarity);
+            match groups.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, cur)) => {
+                    if better_isl_copy(d, cur) {
+                        *cur = d.clone();
+                    }
+                }
+                None => groups.push((key, d.clone())),
+            }
+        }
+        groups.sort_by(|a, b| {
+            b.1.rarity
+                .cmp(&a.1.rarity)
+                .then(b.1.isl_lvl.cmp(&a.1.isl_lvl))
+                .then(a.1.id.cmp(&b.1.id))
+        });
+        for (_, d) in groups.iter().take(slots) {
+            out.insert(d.id);
+        }
+        out
+    }
+
+    pub fn arena_dragons(&self, lim: f64) -> Vec<Dragon> {
+        let active = self.arena_active();
         let mut v: Vec<Dragon> = self
             .dragons
             .iter()
-            .filter(|d| self.dragon_free(d, lim, for_raid))
+            .filter(|d| active.contains(&d.id) && self.dragon_free(d, lim, false))
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| b.pow().partial_cmp(&a.pow()).unwrap_or(std::cmp::Ordering::Equal));
+        v
+    }
+
+    pub fn free_dragons(&self, lim: f64, for_raid: bool) -> Vec<Dragon> {
+        let active = self.island_active();
+        let mut v: Vec<Dragon> = self
+            .dragons
+            .iter()
+            .filter(|d| {
+                d.rented == 0 && active.contains(&d.id) && self.dragon_free(d, lim, for_raid)
+            })
             .cloned()
             .collect();
         v.sort_by(|a, b| b.pow().partial_cmp(&a.pow()).unwrap_or(std::cmp::Ordering::Equal));
@@ -605,6 +681,21 @@ impl Snapshot {
             })
             .unwrap_or(0)
     }
+}
+
+fn better_isl_copy(a: &Dragon, b: &Dragon) -> bool {
+    let la = if a.listed != 0 { 1 } else { 0 };
+    let lb = if b.listed != 0 { 1 } else { 0 };
+    if la != lb {
+        return la < lb;
+    }
+    if a.isl_lvl != b.isl_lvl {
+        return a.isl_lvl > b.isl_lvl;
+    }
+    if a.star_frags / 5 != b.star_frags / 5 {
+        return a.star_frags / 5 > b.star_frags / 5;
+    }
+    a.id < b.id
 }
 
 fn merge<T>(sn: &Value, key: &str, slot: &mut T)

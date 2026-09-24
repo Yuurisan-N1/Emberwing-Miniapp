@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::core::config::Config;
 use crate::core::http::{Api, Res};
 use crate::core::logger;
-use crate::core::state::{el_mult, Snapshot};
+use crate::core::state::{el_mult, Dragon, Snapshot};
 
 pub mod auth;
 pub mod combat;
@@ -68,7 +68,17 @@ pub fn report(tag: &str, res: &Res, good: &str) {
 
 pub fn pick_slots(st: &Snapshot, foes: &[Value], n: usize, for_raid: bool) -> Vec<Value> {
     let lim = st.atk_limit(st.league_idx());
-    let mut pool = st.free_dragons(lim, for_raid);
+    let pool = st.free_dragons(lim, for_raid);
+    pick_from(st, pool, foes, n)
+}
+
+pub fn pick_slots_arena(st: &Snapshot, foes: &[Value], n: usize) -> Vec<Value> {
+    let lim = st.atk_limit(st.league_idx());
+    let pool = st.arena_dragons(lim);
+    pick_from(st, pool, foes, n)
+}
+
+fn pick_from(_st: &Snapshot, mut pool: Vec<Dragon>, foes: &[Value], n: usize) -> Vec<Value> {
     if pool.is_empty() || n == 0 {
         return vec![];
     }

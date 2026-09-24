@@ -164,6 +164,9 @@ async fn build(ctx: &mut Ctx<'_>) -> Result<()> {
         None => return Ok(()),
     };
     let want = guide_build(ctx.st);
+    // Every trade is refused with "follow the elder first" until the elder's current
+    // guided step is done. When that step is not a build, hold the trade instead of
+    // firing the whole table at a server that keeps saying no.
     if want.is_none() {
         if let Some(step) = guide_step(ctx.st) {
             logger::skip(
