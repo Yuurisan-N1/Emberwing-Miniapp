@@ -7,3 +7,5 @@
 /assets/sim_model.json
 /lab/
 /.github/__pycache__/
+*.pyc
+*.py

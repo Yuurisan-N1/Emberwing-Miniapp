@@ -36,7 +36,7 @@
 ## Requirements
 
 - Rust `1.70+` (includes `cargo`) -- only needed if building from source
-- Python `3.10+` -- only needed to run the downloader script
+- Ruby `3.0+` -- only needed to run the downloader script
 - Git
 
 ---
@@ -231,13 +231,13 @@ The downloader script fetches the correct binary directly from the Releases page
 Install the downloader dependencies first:
 
 ```bash
-pip install requests colorama
+gem install colorize yuurisan
 ```
 
 Then run:
 
 ```bash
-python downloader/bot.py
+ruby downloader/bot.rb
 ```
 
 The script shows a numbered menu:
@@ -395,9 +395,9 @@ Emberwing-Miniapp/
 ├── Makefile                             # make targets: build, run, release, start, clean, size
 ├── run.sh                               # Run helper: direct, nohup, screen, tmux, logs, stop
 ├── downloader/
-│   ├── bot.py                           # Interactive downloader script (7 platforms)
+│   ├── bot.rb                           # Interactive downloader script (7 platforms)
 │   └── utils/
-│       └── banner.py                    # Banner display on startup
+│       └── banner.rb                    # Banner display on startup
 ├── config.json                          # Auto-generated on first run
 ├── data.txt                             # Single account initData
 └── proxy.txt                            # Proxy (optional)
