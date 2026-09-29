@@ -172,6 +172,8 @@ pub struct Dragon {
     #[serde(default)]
     pub isl_fights: i64,
     #[serde(default)]
+    pub isl_fought_at: Value,
+    #[serde(default)]
     pub battles_win: i64,
     #[serde(default)]
     pub battles_today: i64,
@@ -245,6 +247,7 @@ impl Dragon {
     pub fn resting(&self, now_ms: i64) -> bool {
         parse_ts(&self.rest_until) > now_ms
     }
+
 
     pub fn used(&self, marker: f64, unranked: bool) -> f64 {
         let win = if unranked {
@@ -503,6 +506,44 @@ impl Snapshot {
         cur.clone()
     }
 
+    pub fn rest_secs(&self, d: &Dragon) -> f64 {
+        self.isl_at(&["rest", "sec"])
+            .as_array()
+            .and_then(|a| a.get(d.rarity.max(0) as usize))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+    }
+
+    pub fn rest_every(&self) -> i64 {
+        self.isl_num(&["rest", "every"])
+            .unwrap_or(5.0)
+            .round()
+            .max(1.0) as i64
+    }
+
+    pub fn isl_sitting(&self, d: &Dragon) -> i64 {
+        let n = d.isl_fights;
+        if n <= 0 {
+            return 0;
+        }
+        let mul = self.isl_num(&["rest", "idleMul"]).unwrap_or(1.0);
+        if mul <= 0.0 {
+            return n;
+        }
+        let win = self.rest_secs(d) * mul * 1000.0;
+        let fought = parse_ts(&d.isl_fought_at);
+        let gap = self.now - fought;
+        if fought > 0 && win > 0.0 && gap >= 0 && (gap as f64) <= win {
+            n
+        } else {
+            0
+        }
+    }
+
+    pub fn raids_left(&self, d: &Dragon) -> i64 {
+        (self.rest_every() - self.isl_sitting(d)).max(0)
+    }
+
     pub fn meat_now(&self) -> f64 {
         let base = self.player.meat;
         let cap = self.player.meat_max.max(base);
@@ -554,13 +595,17 @@ impl Snapshot {
         self.isl_num(&["eggMax"]).unwrap_or(0.0) as i64
     }
 
+    // The client reads (CFG.atkPerWindow||[])[li]||99: the server dropped the
+    // per window attack counter, and a missing or zero entry means no cap at
+    // all, never an empty roster (the 2026-09-29 update emptied every pool).
     pub fn atk_limit(&self, league_idx: i64) -> f64 {
         self.cfg
             .get("atkPerWindow")
             .and_then(|v| v.as_array())
             .and_then(|a| a.get(league_idx.max(0) as usize))
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.0)
+            .filter(|v| *v > 0.0)
+            .unwrap_or(99.0)
     }
 
     pub fn atk_marker(&self) -> f64 {
@@ -580,26 +625,11 @@ impl Snapshot {
         d.used(self.atk_marker(), false) < lim
     }
 
+    // One roster since the 2026-09-29 update: the classic first in line list
+    // (heroCanonical/activeIds) is gone from the client, every battle - arena,
+    // hunt, camp, raid - draws the kinds holding open roost slots.
     pub fn arena_active(&self) -> std::collections::HashSet<i64> {
-        use std::collections::HashSet;
-        let slots = self.player.roost_slots.max(0) as usize;
-        let mut out: HashSet<i64> = HashSet::new();
-        if slots == 0 {
-            for d in self.dragons.iter() {
-                out.insert(d.id);
-            }
-            return out;
-        }
-        let mut owned = 0usize;
-        for d in self.dragons.iter() {
-            if d.rented != 0 {
-                out.insert(d.id);
-            } else if owned < slots {
-                out.insert(d.id);
-                owned += 1;
-            }
-        }
-        out
+        self.island_active()
     }
 
     pub fn island_active(&self) -> std::collections::HashSet<i64> {

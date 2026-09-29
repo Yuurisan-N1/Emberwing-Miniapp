@@ -122,8 +122,8 @@ macro_rules! step {
         step!("forge", features::gear::run);
         step!("arena farm", features::arena::farm::run);
         step!("arena", features::arena::run);
-        step!("expeditions", features::expeditions::run);
         step!("raids", features::raids::run);
+        step!("expeditions", features::expeditions::run);
         step!("hunt camps boss fog", features::hunts::run);
         step!("tavern", features::tavern::run);
 

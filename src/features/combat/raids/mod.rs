@@ -52,9 +52,15 @@ async fn defense(ctx: &mut Ctx<'_>) -> Result<()> {
     ctx.st.raid_defense = res.data.clone();
 
     let team = res.num_of("team").max(1.0) as usize;
+    let cap = res
+        .num_of("cap")
+        .max(ctx.st.isl_num(&["raid", "defCap"]).unwrap_or(0.0));
     let have = res.arr("ids");
-    let cap = res.num_of("cap") as usize;
-    if !have.is_empty() && (cap == 0 || have.len() >= team.min(cap)) {
+    if have.len() >= team {
+        return Ok(());
+    }
+    if cap <= 0.0 {
+        logger::skip("raid", "the watch cap is unknown, the board is left alone");
         return Ok(());
     }
     let exp_team = ctx
@@ -68,8 +74,13 @@ async fn defense(ctx: &mut Ctx<'_>) -> Result<()> {
         return Ok(());
     }
     let mut pool = ctx.st.dragons.clone();
-    pool.retain(|d| !d.away() && d.listed == 0);
-    pool.sort_by(|a, b| b.pow().partial_cmp(&a.pow()).unwrap_or(std::cmp::Ordering::Equal));
+    pool.retain(|d| !d.away() && d.listed == 0 && d.rented == 0 && (d.rarity as f64) <= cap);
+    pool.sort_by(|a, b| {
+        b.rarity
+            .cmp(&a.rarity)
+            .then(b.isl_level().cmp(&a.isl_level()))
+            .then(b.pow().partial_cmp(&a.pow()).unwrap_or(std::cmp::Ordering::Equal))
+    });
     let ids: Vec<i64> = pool.iter().take(team.min(spare)).map(|d| d.id).collect();
     if ids.is_empty() {
         return Ok(());
@@ -146,14 +157,82 @@ async fn search(ctx: &mut Ctx<'_>) -> Result<()> {
         logger::skip("raid", &format!("search costs {} gold", logger::num(fee)));
         return Ok(());
     }
-    let pool = super::arena::policy::candidates(ctx.st, ctx.atk_limit(), 7);
+    let pool = super::arena::policy::raid_candidates(ctx.st, ctx.atk_limit(), 7);
     if pool.is_empty() {
         logger::skip("raid", "no dragon free to raid with");
+        return Ok(());
+    }
+    let every = ctx.st.rest_every();
+    let lim = ctx.atk_limit();
+    let now = ctx.st.now;
+    let active = ctx.st.island_active();
+    let mut seats = 0i64;
+    let mut away = 0i64;
+    let mut resting = 0i64;
+    let mut tight = 0i64;
+    for d in ctx
+        .st
+        .dragons
+        .iter()
+        .filter(|d| d.rented == 0 && active.contains(&d.id))
+    {
+        seats += 1;
+        if d.away() {
+            away += 1;
+        } else if d.resting(now) {
+            resting += 1;
+        } else if d.training(now) || d.listed != 0 || d.used(ctx.st.atk_marker(), false) >= lim {
+            tight += 1;
+        }
+    }
+    let head: i64 = pool.iter().map(|d| ctx.st.raids_left(d)).sum();
+    let lead = pool
+        .iter()
+        .max_by_key(|d| ctx.st.isl_sitting(d))
+        .cloned()
+        .unwrap_or_else(|| pool[0].clone());
+    logger::skip(
+        "raid",
+        &format!(
+            "the roost seats {} kinds, {} answer the call, {} away on trips, {} resting, {} out of window",
+            seats,
+            pool.len(),
+            away,
+            resting,
+            tight
+        ),
+    );
+    logger::skip(
+        "raid",
+        &format!(
+            "{} raid heads stand before the rest, {} is deepest at {}/{} with {} min waiting",
+            head,
+            lead.name,
+            ctx.st.isl_sitting(&lead),
+            every,
+            logger::num((ctx.st.rest_secs(&lead) / 60.0).round())
+        ),
+    );
+    if pool.len() == 1 && ctx.st.raids_left(&pool[0]) <= 1 {
+        logger::skip(
+            "raid",
+            "one dragon stands and it is on its last raid, the roost keeps it and the board waits",
+        );
         return Ok(());
     }
 
     let model = super::arena::sim::Model::load();
     let calib = super::arena::model::Calib::load();
+    logger::skip(
+        "raid",
+        &format!(
+            "the model is {}, the roost answers with {} free dragons and {} heads them at {}",
+            model.source,
+            logger::num(pool.len() as f64),
+            pool[0].name,
+            logger::num(pool[0].pow())
+        ),
+    );
     let runs = ctx.cfg.arena.sim_runs.max(40) as usize;
     let tries = ctx.cfg.arena.max_rerolls.max(1);
     let mut seen: Vec<i64> = Vec::new();
