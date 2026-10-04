@@ -7,7 +7,6 @@
 <p>
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-f74c00?logo=rust&logoColor=white"/>
   <img alt="platform" src="https://img.shields.io/badge/Platform-Emberwing%20Miniapp-111111"/>
-  <img alt="build" src="https://github.com/Yuurisan-N1/Emberwing-Miniapp/actions/workflows/build.yml/badge.svg"/>
   <img alt="author" src="https://img.shields.io/badge/by-Yuurisandesu-111111"/>
 </p>
 
