@@ -113,6 +113,7 @@ macro_rules! step {
         step!("quests", features::quests::run);
         step!("achievements", features::achievements::run);
         step!("festival and top up", features::event::run);
+        step!("forge festival", features::forge::run);
         step!("pass", features::pass::run);
         step!("island", features::island::run);
         step!("islanders", features::villagers::run);

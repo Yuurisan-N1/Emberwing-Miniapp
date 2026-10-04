@@ -45,6 +45,8 @@ pub struct Config {
     pub achievements: AchievementsCfg,
     #[serde(default = "default_event")]
     pub event: EventCfg,
+    #[serde(default = "default_forge")]
+    pub forge: ForgeCfg,
     #[serde(default = "on")]
     pub pass: Toggle,
     #[serde(default = "on")]
@@ -200,6 +202,26 @@ pub struct EventCfg {
     pub enabled: bool,
     #[serde(default = "yes")]
     pub claim_free: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ForgeCfg {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default = "default_forge_stages")]
+    pub max_stages: u32,
+    #[serde(default)]
+    pub buy_boosters: bool,
+    #[serde(default = "default_forge_samples")]
+    pub samples: u32,
+    #[serde(default)]
+    pub threads: usize,
+    #[serde(default = "default_forge_deadline")]
+    pub deadline_ms: u64,
+    #[serde(default = "default_forge_nodes")]
+    pub nodes: u64,
+    #[serde(default = "default_forge_worlds")]
+    pub worlds: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -378,6 +400,39 @@ fn default_event() -> EventCfg {
     }
 }
 
+fn default_forge_stages() -> u32 {
+    0
+}
+
+fn default_forge_samples() -> u32 {
+    32
+}
+
+fn default_forge_deadline() -> u64 {
+    1800
+}
+
+fn default_forge_nodes() -> u64 {
+    20000
+}
+
+fn default_forge_worlds() -> usize {
+    0
+}
+
+fn default_forge() -> ForgeCfg {
+    ForgeCfg {
+        enabled: true,
+        max_stages: default_forge_stages(),
+        buy_boosters: false,
+        samples: default_forge_samples(),
+        threads: 0,
+        deadline_ms: default_forge_deadline(),
+        nodes: default_forge_nodes(),
+        worlds: default_forge_worlds(),
+    }
+}
+
 fn default_tavern() -> TavernCfg {
     TavernCfg {
         enabled: true,
@@ -441,6 +496,7 @@ fn sample_config() -> serde_json::Value {
         "quests": { "enabled": true },
         "achievements": { "enabled": true },
         "event": { "enabled": true, "claim_free": true },
+        "forge": { "enabled": true, "max_stages": 0, "buy_boosters": false, "samples": 32, "threads": 0, "deadline_ms": 1800, "nodes": 20000 },
         "pass": { "enabled": true },
         "referrals": { "enabled": true },
         "tavern": { "enabled": true, "kind": "d", "max_rolls_per_cycle": 5 }

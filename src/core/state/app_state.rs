@@ -248,7 +248,6 @@ impl Dragon {
         parse_ts(&self.rest_until) > now_ms
     }
 
-
     pub fn used(&self, marker: f64, unranked: bool) -> f64 {
         let win = if unranked {
             self.battles_win_u as f64
@@ -595,9 +594,6 @@ impl Snapshot {
         self.isl_num(&["eggMax"]).unwrap_or(0.0) as i64
     }
 
-    // The client reads (CFG.atkPerWindow||[])[li]||99: the server dropped the
-    // per window attack counter, and a missing or zero entry means no cap at
-    // all, never an empty roster (the 2026-09-29 update emptied every pool).
     pub fn atk_limit(&self, league_idx: i64) -> f64 {
         self.cfg
             .get("atkPerWindow")
@@ -625,9 +621,6 @@ impl Snapshot {
         d.used(self.atk_marker(), false) < lim
     }
 
-    // One roster since the 2026-09-29 update: the classic first in line list
-    // (heroCanonical/activeIds) is gone from the client, every battle - arena,
-    // hunt, camp, raid - draws the kinds holding open roost slots.
     pub fn arena_active(&self) -> std::collections::HashSet<i64> {
         self.island_active()
     }

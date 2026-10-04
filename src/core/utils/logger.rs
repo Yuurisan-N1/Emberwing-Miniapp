@@ -1,15 +1,97 @@
-pub const W: usize = 63;
+pub const W: usize = 96;
+
+use std::io::{IsTerminal, Write};
+use std::sync::Mutex;
+
+pub const G: &str = "\x1b[1;32m";
+pub const Y: &str = "\x1b[1;33m";
+pub const R: &str = "\x1b[1;31m";
+pub const Z: &str = "\x1b[0m";
+
+static WIDE: Mutex<usize> = Mutex::new(0);
+
+#[cfg(windows)]
+pub fn vt_on() {
+    const STD_OUTPUT_HANDLE: u32 = 0xFFFF_FFF5;
+    const VT: u32 = 0x0004;
+    extern "system" {
+        fn GetStdHandle(n: u32) -> *mut core::ffi::c_void;
+        fn GetConsoleMode(h: *mut core::ffi::c_void, m: *mut u32) -> i32;
+        fn SetConsoleMode(h: *mut core::ffi::c_void, m: u32) -> i32;
+    }
+    unsafe {
+        let h = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut m: u32 = 0;
+        if GetConsoleMode(h, &mut m) != 0 {
+            SetConsoleMode(h, m | VT);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn vt_on() {}
+
+fn wide() -> std::sync::MutexGuard<'static, usize> {
+    match WIDE.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    }
+}
+
+pub fn live(msg: &str) {
+    let m = clip(msg);
+    let n = m.chars().count();
+    let mut out = std::io::stdout();
+    let mut last = wide();
+    if std::io::stdout().is_terminal() {
+        let pad = if *last > n { *last - n } else { 0 };
+        let _ = write!(out, "\r{}{}{}", Y, m, Z);
+        for _ in 0..pad {
+            let _ = out.write_all(b" ");
+        }
+        let _ = out.flush();
+        *last = n;
+    } else {
+        let _ = writeln!(out, "{}{}{}", Y, m, Z);
+        let _ = out.flush();
+        *last = 0;
+    }
+}
+
+pub fn live_end() {
+    let mut last = wide();
+    if *last == 0 {
+        return;
+    }
+    if std::io::stdout().is_terminal() {
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\r");
+        for _ in 0..*last {
+            let _ = out.write_all(b" ");
+        }
+        let _ = write!(out, "\r");
+        let _ = out.flush();
+    }
+    *last = 0;
+}
+
+fn hard(color: &str, msg: &str) {
+    let mut last = wide();
+    let _ = writeln!(std::io::stdout(), "{}{}{}", color, msg, Z);
+    let _ = std::io::stdout().flush();
+    *last = 0;
+}
 
 pub fn lg(msg: &str) {
-    println!("\x1b[1;32m{}\x1b[0m", msg);
+    hard(G, msg);
 }
 
 pub fn ly(msg: &str) {
-    println!("\x1b[1;33m{}\x1b[0m", msg);
+    hard(Y, msg);
 }
 
 pub fn lr(msg: &str) {
-    println!("\x1b[1;31m{}\x1b[0m", msg);
+    hard(R, msg);
 }
 
 pub fn ok(tag: &str, msg: &str) {
@@ -86,7 +168,12 @@ pub fn clean_text(text: &str) -> String {
 
 pub fn server_reason(err: &str) -> String {
     let e = clean_text(err);
-    for p in ["Bad Request:", "Unauthorized:", "Internal Server Error:", "Conflict:"] {
+    for p in [
+        "Bad Request:",
+        "Unauthorized:",
+        "Internal Server Error:",
+        "Conflict:",
+    ] {
         if let Some(rest) = e.strip_prefix(p) {
             return rest.trim().to_string();
         }

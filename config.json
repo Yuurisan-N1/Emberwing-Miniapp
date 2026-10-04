@@ -94,6 +94,15 @@
     "enabled": true,
     "claim_free": true
   },
+  "forge": {
+    "enabled": true,
+    "max_stages": 0,
+    "buy_boosters": false,
+    "samples": 32,
+    "threads": 0,
+    "deadline_ms": 1800,
+    "nodes": 20000
+  },
   "pass": {
     "enabled": true
   },

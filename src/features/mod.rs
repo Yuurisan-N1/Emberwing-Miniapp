@@ -17,7 +17,7 @@ pub use auth::{presence, referrals, session};
 pub use combat::{arena, expeditions, hunts, raids};
 pub use entities::{dragons, eggs, gear, island, tavern, villagers};
 pub use progression::{achievements, daily_gift, pass, quests};
-pub use system::{event, notices};
+pub use system::{event, forge, notices};
 
 pub struct Ctx<'a> {
     pub api: Arc<Api>,
