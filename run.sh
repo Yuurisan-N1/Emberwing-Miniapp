@@ -5,7 +5,22 @@ LOG_FILE="emberwing-bot.log"
 SESSION_NAME="emberwing-bot"
 
 
+build_cuda_if_missing() {
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*|Windows*) NAMES="cuda/forge_mc.dll cuda/libforge_mc.dll" ;;
+        Darwin*) NAMES="cuda/libforge_mc.dylib cuda/forge_mc.dylib" ;;
+        *) NAMES="cuda/libforge_mc.so cuda/forge_mc.so" ;;
+    esac
+    for n in $NAMES; do
+        [ -f "$n" ] && return 0
+    done
+    [ -f "scripts/build_cuda.sh" ] || return 0
+    echo "cuda lib missing, trying scripts/build_cuda.sh (optional, cpu backend still works)"
+    bash scripts/build_cuda.sh || echo "cuda build skipped, running on the cpu backend"
+}
+
 build_release() {
+    build_cuda_if_missing
     echo "Building release binary..."
     cargo build --release
     if [ $? -ne 0 ]; then

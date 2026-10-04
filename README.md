@@ -1,18 +1,19 @@
 <div align="center">
 
-<img width="100%" alt="header" src="https://capsule-render.vercel.app/api?type=waving&height=210&text=Emberwing%20Bot&fontAlign=50&fontAlignY=36&fontSize=56&desc=Dragons%20%7C%20Arena%20%7C%20Island%20%7C%20Raids%20%7C%20Expeditions%20%7C%20Full%20Automation&descAlign=50&descAlignY=58"/>
+<img width="100%" alt="header" src="https://capsule-render.vercel.app/api?type=waving&height=210&text=Emberwing%20Bot&fontAlign=50&fontAlignY=36&fontSize=56&desc=Dragons%20%7C%20Arena%20%7C%20Island%20%7C%20Raids%20%7C%20Expeditions%20%7C%20Forge%20%7C%20Full%20Automation&descAlign=50&descAlignY=58"/>
 
-<img alt="typing" src="https://readme-typing-svg.demolab.com?font=Inter&size=18&duration=3000&pause=650&center=true&vCenter=true&width=900&lines=Auto+Dragon+Level+Up+%2F+Ability+%2F+Rarity+Up;Auto+Arena+%7C+Sim-Based+Fight+Selection;Auto+Expeditions+%7C+Raids+%7C+Hunts+%7C+Camps;Auto+Island+%7C+Build+%2F+Upgrade+%2F+Collect;Auto+Eggs+%7C+Merge+%2F+Incubate+%2F+Open;Auto+Gear+%7C+Craft+%2F+Equip+%2F+Level+%2F+Fuse"/>
+<img alt="typing" src="https://readme-typing-svg.demolab.com?font=Inter&size=18&duration=3000&pause=650&center=true&vCenter=true&width=900&lines=Auto+Dragon+Level+Up+%2F+Ability+%2F+Rarity+Up;Auto+Arena+%7C+Sim-Based+Fight+Selection;Auto+Expeditions+%7C+Raids+%7C+Hunts+%7C+Camps;Auto+Island+%7C+Build+%2F+Upgrade+%2F+Collect;Auto+Eggs+%7C+Merge+%2F+Incubate+%2F+Open;Auto+Gear+%7C+Craft+%2F+Equip+%2F+Level+%2F+Fuse;Auto+Forge+%7C+Festival+Tile+Puzzle+Solver+GPU%2FCPU"/>
 
 <p>
   <img alt="rust" src="https://img.shields.io/badge/Rust-2021-f74c00?logo=rust&logoColor=white"/>
   <img alt="platform" src="https://img.shields.io/badge/Platform-Emberwing%20Miniapp-111111"/>
+  <img alt="build" src="https://github.com/Yuurisan-N1/Emberwing-Miniapp/actions/workflows/build.yml/badge.svg"/>
   <img alt="author" src="https://img.shields.io/badge/by-Yuurisandesu-111111"/>
 </p>
 
 <p>
   <b>Emberwing Bot</b> is a full automation bot for the Emberwing dragon game Telegram Miniapp.<br/>
-  It handles a comprehensive cycle of 20 feature modules: daily gift, referrals, quests, achievements, festival events, season pass, island management, villagers, hatchery, dragon management, gear forge, arena combat with simulation-based team selection, arena gold farming, expeditions, raids, hunts, camps, monster battles, area clears, and tavern rolls, all running in a single account loop with presence heartbeat, proxy support, and a live countdown between cycles.<br/>
+  It handles a comprehensive cycle of 21 feature modules: daily gift, referrals, quests, achievements, festival events, season pass, island management, villagers, hatchery, dragon management, gear forge, arena combat with simulation-based team selection, arena gold farming, expeditions, raids, hunts, camps, monster battles, area clears, tavern rolls, and the Forge festival tile puzzle solver with GPU-accelerated Monte Carlo planning, all running in a single account loop with presence heartbeat, proxy support, and a live countdown between cycles.<br/>
   Built and distributed by <b>Yuurisandesu</b>.
 </p>
 
@@ -38,6 +39,7 @@
 - Rust `1.70+` (includes `cargo`) -- only needed if building from source
 - Ruby `3.0+` -- only needed to run the downloader script
 - Git
+- CUDA Toolkit `12.x` -- optional, only needed to build the GPU backend for Forge
 
 ---
 
@@ -120,6 +122,7 @@ socks5://user:pass@host:port
 | `eggs` | `merge`, `incubate`, `open_free` |
 | `island` | `build`, `upgrade`, `collect`, `assign_auto`, `complete_jobs`, `den_collect` |
 | `gear` | `craft`, `equip`, `level_up`, `fuse` |
+| `forge` | `enabled`, `max_stages`, `samples`, `threads`, `deadline_ms`, `nodes`, `worlds`, `buy_boosters` |
 
 ---
 
@@ -226,12 +229,25 @@ chmod +x emberwing-bot-linux-x86_64
 
 ### Option C - Downloader Script
 
-The downloader script fetches the correct binary directly from the Releases page for your platform. The binary is saved inside the `downloader/` folder.
+The downloader script fetches the correct binary directly from the Releases page for your platform. The binary is saved inside the `downloader/` folder. Ruby is required to run the script -- see how to install Ruby below.
 
-Install the downloader dependencies first:
+**Install Ruby:**
 
+Linux:
 ```bash
-gem install colorize yuurisan
+sudo apt install ruby
+```
+
+macOS:
+```bash
+brew install ruby
+```
+
+Windows: Download from https://rubyinstaller.org and follow the installer.
+
+Termux:
+```bash
+pkg install ruby
 ```
 
 Then run:
@@ -332,6 +348,18 @@ The bot runs all available hunt boss fights, clears active camps, fights availab
 ### Tavern
 The bot spends tickets on tavern rolls up to `max_rolls_per_cycle` per cycle. The `kind` setting controls which ticket type is spent. Remaining pity progress is logged when no tickets are available.
 
+### Forge Festival Tile Puzzle
+The bot plays the Forge festival tile-matching puzzle automatically. For each available ticket, it starts a stage, reads the live board state and layout geometry, and plans moves using a Monte Carlo tree search. The planner samples configurable numbers of random rollouts per candidate move across a configurable thread pool, scoring each move by estimated win probability. On systems with a compatible NVIDIA GPU, the Monte Carlo sampling runs on the GPU for significantly higher throughput -- the bot detects the GPU at startup and reports whether the CUDA backend is active or whether it falls back to the CPU pool. If the bot gets stuck with no valid move and `buy_boosters` is enabled, it purchases a booster pack to unblock the board and continues. The bot resumes any interrupted live stage on startup before starting new ones. Up to `max_stages` stages are cleared per cycle. Available tickets including free and paid are counted and accrued passively between cycle checks.
+
+### GPU Backend (optional)
+To enable the GPU backend for the Forge puzzle solver, build the CUDA shared library first using the provided script. CUDA Toolkit 12.x and nvcc are required. The script auto-detects the installed GPU compute capability and compiles for all supported architectures:
+
+```bash
+bash scripts/build_cuda.sh
+```
+
+The compiled library is placed in `cuda/`. When the bot starts, it detects and loads the library automatically if present. If the library is absent or fails to load, the bot falls back to the CPU thread pool without any configuration change required.
+
 ### Presence
 A background heartbeat task pings the server at a regular interval to keep the session alive while the bot is running between steps.
 
@@ -370,7 +398,7 @@ Emberwing-Miniapp/
 │       ├── entities/
 │       │   ├── dragons/                 # Dragon level, ability, rarity
 │       │   ├── eggs/                    # Egg merge, incubate, open
-│       │   ├── gear/                    # Forge craft, equip, level, fuse
+│       │   ├── gear/                    # Gear craft, equip, level, fuse
 │       │   ├── island/                  # Build, upgrade, collect, jobs, den
 │       │   ├── tavern/                  # Tavern rolls
 │       │   └── villagers/              # Villager fragment upgrade
@@ -381,7 +409,17 @@ Emberwing-Miniapp/
 │       │   └── quests/                  # Quest and chain claim
 │       └── system/
 │           ├── event/                   # Festival and top-up event
+│           ├── forge/                   # Forge tile puzzle solver, Monte Carlo planner, GPU/CPU dispatch
 │           └── notices/                 # Server notices
+├── cuda/
+│   ├── forge_mc.cu                      # CUDA Monte Carlo kernel
+│   ├── forge_ev.cu                      # CUDA evaluation kernel
+│   ├── forge_mc.cuh                     # Monte Carlo kernel header
+│   ├── forge_ev.cuh                     # Evaluation kernel header
+│   └── forge_core.cuh                   # Shared CUDA core definitions
+├── engine/
+│   ├── boards.h                         # Board representation header
+│   └── forge.h                          # Forge engine interface header
 ├── assets/
 │   ├── icon.ico                         # Windows binary icon
 │   └── sim_model.json                   # Arena combat simulation model weights
@@ -389,13 +427,16 @@ Emberwing-Miniapp/
 │   ├── collect.py                       # Data collection script for sim model
 │   ├── fit.py                           # Model fitting script
 │   └── sim.py                           # Simulation development script
+├── scripts/
+│   ├── build_cuda.sh                    # Build script for CUDA shared library
+│   └── package.sh                       # Package script for release distribution
 ├── Cargo.toml                           # Project manifest and dependencies
 ├── Cargo.lock
 ├── build.rs                             # Build script (embeds icon into Windows binary)
 ├── Makefile                             # make targets: build, run, release, start, clean, size
 ├── run.sh                               # Run helper: direct, nohup, screen, tmux, logs, stop
 ├── downloader/
-│   ├── bot.rb                           # Interactive downloader script (7 platforms)
+│   ├── bot.rb                           # Interactive downloader script (7 platforms, Ruby)
 │   └── utils/
 │       └── banner.rb                    # Banner display on startup
 ├── config.json                          # Auto-generated on first run

@@ -157,6 +157,19 @@ impl Search {
         if b.st == 2 {
             return Some(false);
         }
+        if rm == 0 && rf == 0 && rb == 0 {
+            if let Some(mut p) = Plain::from_brd(b) {
+                p.cap = self.cap.saturating_sub(self.nodes).max(1);
+                p.stop = self.stop;
+                let r = p.solve();
+                self.nodes += p.nodes;
+                if p.overflow {
+                    self.overflow = true;
+                    return None;
+                }
+                return Some(r);
+            }
+        }
         if load_min(b) >= b.slots {
             return Some(false);
         }
@@ -344,5 +357,310 @@ pub fn step(b: &mut Brd, m: &Move, rm: &mut i64, rf: &mut i64, rb: &mut i64) -> 
             *rf -= 1;
             true
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fast exact solver for the no-booster case.
+//
+// Without boosters the side row is never used and the tray is a pure function
+// of the tiles already taken: a face with `t` tiles taken keeps `t % 3` of them
+// in the tray. The position is therefore just the on-board mask, so the memo
+// key is cheap and no node needs to clone the board.
+// ---------------------------------------------------------------------------
+
+pub struct Plain {
+    pub n: usize,
+    pub slots: i32,
+    pub nf: usize,
+    pub face: Vec<u16>,
+    w: usize,
+    up: Vec<u64>,
+    on: Vec<u64>,
+    rem: Vec<i32>,
+    taken: Vec<i32>,
+    tray: i32,
+    unlock: Vec<u32>,
+    buf: Vec<u32>,
+    memo: HashMap<u64, bool>,
+    pub nodes: u64,
+    pub cap: u64,
+    pub stop: Option<Instant>,
+    pub overflow: bool,
+    depth: usize,
+}
+
+impl Plain {
+    pub fn from_brd(b: &Brd) -> Option<Self> {
+        if !b.side.is_empty() {
+            return None;
+        }
+        let n = b.n;
+        if n == 0 || n > 4096 {
+            return None;
+        }
+        let mut map: HashMap<i64, u16> = HashMap::new();
+        let mut face = vec![0u16; n];
+        for i in 0..n {
+            let f = b.face[i];
+            if f < 0 {
+                return None;
+            }
+            let id = match map.get(&f) {
+                Some(&id) => id,
+                None => {
+                    let id = map.len() as u16;
+                    map.insert(f, id);
+                    id
+                }
+            };
+            face[i] = id;
+        }
+        let nf = map.len();
+        let w = (n + 63) / 64;
+        let mut up = vec![0u64; n * w];
+        for i in 0..n {
+            for j in 0..n {
+                if b.up[i].test(j) {
+                    up[i * w + (j >> 6)] |= 1u64 << (j & 63);
+                }
+            }
+        }
+        let mut on = vec![0u64; w];
+        let mut rem = vec![0i32; nf];
+        let mut total = vec![0i32; nf];
+        for i in 0..n {
+            total[face[i] as usize] += 1;
+            if b.on.test(i) {
+                on[i >> 6] |= 1u64 << (i & 63);
+                rem[face[i] as usize] += 1;
+            }
+        }
+        let taken: Vec<i32> = (0..nf).map(|f| total[f] - rem[f]).collect();
+        let tray: i32 = taken.iter().map(|t| t % 3).sum();
+        let mut unlock = vec![0u32; n];
+        for i in 0..n {
+            let mut c = 0u32;
+            for j in 0..n {
+                if up[j * w + (i >> 6)] & (1u64 << (i & 63)) != 0 {
+                    c += 1;
+                }
+            }
+            unlock[i] = c;
+        }
+        Some(Plain {
+            n,
+            slots: b.slots as i32,
+            nf,
+            face,
+            w,
+            up,
+            on,
+            rem,
+            taken,
+            tray,
+            unlock,
+            buf: vec![0u32; n * (n + 1)],
+            memo: HashMap::new(),
+            nodes: 0,
+            cap: u64::MAX,
+            stop: None,
+            overflow: false,
+            depth: 0,
+        })
+    }
+
+    fn free(&self, i: usize) -> bool {
+        let base = i * self.w;
+        for k in 0..self.w {
+            if self.up[base + k] & self.on[k] != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn empty(&self) -> bool {
+        self.on.iter().all(|&x| x == 0)
+    }
+
+    fn hash(&self) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        for &x in &self.on {
+            h ^= x;
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+        h
+    }
+
+    fn tap(&mut self, i: usize) {
+        let f = self.face[i] as usize;
+        self.on[i >> 6] &= !(1u64 << (i & 63));
+        self.rem[f] -= 1;
+        let before = self.taken[f] % 3;
+        self.taken[f] += 1;
+        self.tray += self.taken[f] % 3 - before;
+    }
+
+    fn untap(&mut self, i: usize) {
+        let f = self.face[i] as usize;
+        self.on[i >> 6] |= 1u64 << (i & 63);
+        let before = self.taken[f] % 3;
+        self.taken[f] -= 1;
+        self.tray += self.taken[f] % 3 - before;
+        self.rem[f] += 1;
+    }
+
+    fn doomed(&self) -> bool {
+        for f in 0..self.nf {
+            let r = self.taken[f] % 3;
+            if r != 0 && self.rem[f] < 3 - r {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn rec(&mut self) -> bool {
+        if self.empty() {
+            return self.tray == 0;
+        }
+        if self.tray >= self.slots || self.doomed() {
+            return false;
+        }
+        self.nodes += 1;
+        if self.nodes >= self.cap {
+            self.overflow = true;
+            return false;
+        }
+        if let Some(t) = self.stop {
+            if self.nodes & 0x3ff == 0 && Instant::now() >= t {
+                self.overflow = true;
+                return false;
+            }
+        }
+        let k = self.hash();
+        if let Some(&v) = self.memo.get(&k) {
+            return v;
+        }
+        let mut cnt = 0usize;
+        let base = self.depth * self.n;
+        for wi in 0..self.w {
+            let mut x = self.on[wi];
+            while x != 0 {
+                let b = x.trailing_zeros() as usize;
+                let i = wi * 64 + b;
+                if i < self.n && self.free(i) {
+                    let f = self.face[i] as usize;
+                    let clears = self.taken[f] % 3 == 2;
+                    if clears || self.tray + 1 < self.slots {
+                        self.buf[base + cnt] = i as u32;
+                        cnt += 1;
+                    }
+                }
+                x &= x - 1;
+            }
+        }
+        if cnt == 0 {
+            self.memo.insert(k, false);
+            return false;
+        }
+        {
+            let buf = &mut self.buf[base..base + cnt];
+            let face = &self.face;
+            let taken = &self.taken;
+            let unlock = &self.unlock;
+            buf.sort_unstable_by_key(|&i| {
+                let f = face[i as usize] as usize;
+                let r = taken[f] % 3;
+                let cls = match r {
+                    2 => 0u32,
+                    1 => 1,
+                    _ => 2,
+                };
+                (cls, std::cmp::Reverse(unlock[i as usize]))
+            });
+        }
+        self.depth += 1;
+        let mut out = false;
+        for idx in 0..cnt {
+            let i = self.buf[base + idx] as usize;
+            self.tap(i);
+            let r = self.rec();
+            self.untap(i);
+            if r {
+                out = true;
+                break;
+            }
+            if self.overflow {
+                break;
+            }
+        }
+        self.depth -= 1;
+        if !self.overflow {
+            self.memo.insert(k, out);
+        }
+        out
+    }
+
+    pub fn solve(&mut self) -> bool {
+        self.rec()
+    }
+
+    /// Index of a tile whose tap is proven to win, or None when the position is
+    /// a loss (or the budget ran out).
+    pub fn first_win(&mut self) -> Option<usize> {
+        if self.empty() {
+            return None;
+        }
+        let mut cnt = 0usize;
+        for i in 0..self.n {
+            if self.on[i >> 6] & (1u64 << (i & 63)) == 0 {
+                continue;
+            }
+            if !self.free(i) {
+                continue;
+            }
+            let f = self.face[i] as usize;
+            let clears = self.taken[f] % 3 == 2;
+            if clears || self.tray + 1 < self.slots {
+                self.buf[cnt] = i as u32;
+                cnt += 1;
+            }
+        }
+        if cnt == 0 {
+            return None;
+        }
+        {
+            let buf = &mut self.buf[..cnt];
+            let face = &self.face;
+            let taken = &self.taken;
+            let unlock = &self.unlock;
+            buf.sort_unstable_by_key(|&i| {
+                let f = face[i as usize] as usize;
+                let r = taken[f] % 3;
+                let cls = match r {
+                    2 => 0u32,
+                    1 => 1,
+                    _ => 2,
+                };
+                (cls, std::cmp::Reverse(unlock[i as usize]))
+            });
+        }
+        let picks: Vec<usize> = self.buf[..cnt].iter().map(|&x| x as usize).collect();
+        for i in picks {
+            self.tap(i);
+            self.depth = 1;
+            let r = self.rec();
+            self.depth = 0;
+            self.untap(i);
+            if r {
+                return Some(i);
+            }
+            if self.overflow {
+                return None;
+            }
+        }
+        None
     }
 }

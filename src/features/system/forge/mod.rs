@@ -32,12 +32,10 @@ impl Ticker {
                 let el = t0.elapsed().as_secs_f64().max(1e-6);
                 let dc = logic::combos().saturating_sub(c0) as f64;
                 logger::live(&format!(
-                    "Forge stage {} move {} trying {} combos per second total {} in {:.1} seconds",
+                    "Forge stage {} move {} combos per second {}",
                     stage,
                     moves,
-                    logic::fmt_count(dc / el),
-                    logic::fmt_count(dc),
-                    el
+                    logic::fmt_count(dc / el)
                 ));
                 std::thread::sleep(std::time::Duration::from_millis(150));
             }
@@ -134,6 +132,9 @@ pub async fn run(ctx: &mut Ctx<'_>) -> Result<()> {
         let st = play(ctx, &live, &mut tile).await?;
         if st != "won" {
             logger::skip("forge", &format!("stage {} {}", stage, st));
+            if st == "no move" {
+                break;
+            }
             if let Some(t) = refresh(ctx).await {
                 tile = t;
             }
@@ -229,18 +230,18 @@ async fn play(ctx: &mut Ctx<'_>, live: &Value, tile: &mut Value) -> Result<Strin
         let mut tick = Ticker::new(stage, moves, c0, t0);
         let hit = plan(&b, &boost, &bud);
         tick.stop();
-        let el = t0.elapsed().as_secs_f64().max(1e-6);
-        let dc = logic::combos().saturating_sub(c0) as f64;
+        if let Some(rep) = logic::gpu_report_once() {
+            logger::lg(&format!("Forge {}", rep));
+        }
         let mv = match hit.map(|(m, _, _)| m) {
             Some(m) => m,
             None => {
-                logger::live_end();
-                logger::lr(&format!(
-                    "Forge stage {} stuck after {} combos in {:.1} seconds {}",
+                logger::rlive(&format!(
+                    "Forge stage {} stuck, tray {} of {} hidden {}",
                     stage,
-                    logic::fmt_count(dc),
-                    el,
-                    logic::diag(&b, &boost)
+                    b.tray.len(),
+                    slots,
+                    logic::hidden_left(&b)
                 ));
                 if ctx.cfg.forge.buy_boosters && boost.can_buy(&b) && buy(ctx, &b, &mut boost, tile).await? {
                     continue;
@@ -298,20 +299,15 @@ async fn play(ctx: &mut Ctx<'_>, live: &Value, tile: &mut Value) -> Result<Strin
             v = v2.clone();
             let nb = Board::from(&v, &geo, slots, stash);
             logger::live(&format!(
-                "Forge stage {} move {} tap {} face {} tray {} of {} combos {}",
+                "Forge stage {} move {} tap {} tray {}/{}",
                 stage,
                 moves,
                 match mv {
                     Move::Tap(i) => i as i64,
                     _ => -1,
                 },
-                match mv {
-                    Move::Tap(i) => b.face[i],
-                    _ => -1,
-                },
                 nb.tray.len(),
-                slots,
-                logic::fmt_count(dc)
+                slots
             ));
         } else {
             return give_up(ctx, aid, "closed").await;

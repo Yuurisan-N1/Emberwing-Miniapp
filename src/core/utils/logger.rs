@@ -38,24 +38,32 @@ fn wide() -> std::sync::MutexGuard<'static, usize> {
     }
 }
 
-pub fn live(msg: &str) {
+pub fn soft(color: &str, msg: &str) {
     let m = clip(msg);
     let n = m.chars().count();
     let mut out = std::io::stdout();
     let mut last = wide();
     if std::io::stdout().is_terminal() {
         let pad = if *last > n { *last - n } else { 0 };
-        let _ = write!(out, "\r{}{}{}", Y, m, Z);
+        let _ = write!(out, "\r{}{}{}", color, m, Z);
         for _ in 0..pad {
             let _ = out.write_all(b" ");
         }
         let _ = out.flush();
         *last = n;
     } else {
-        let _ = writeln!(out, "{}{}{}", Y, m, Z);
+        let _ = writeln!(out, "{}{}{}", color, m, Z);
         let _ = out.flush();
         *last = 0;
     }
+}
+
+pub fn live(msg: &str) {
+    soft(Y, msg);
+}
+
+pub fn rlive(msg: &str) {
+    soft(R, msg);
 }
 
 pub fn live_end() {
@@ -77,8 +85,12 @@ pub fn live_end() {
 
 fn hard(color: &str, msg: &str) {
     let mut last = wide();
-    let _ = writeln!(std::io::stdout(), "{}{}{}", color, msg, Z);
-    let _ = std::io::stdout().flush();
+    let mut out = std::io::stdout();
+    if *last > 0 {
+        let _ = out.write_all(b"\n");
+    }
+    let _ = writeln!(out, "{}{}{}", color, msg, Z);
+    let _ = out.flush();
     *last = 0;
 }
 

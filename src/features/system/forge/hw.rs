@@ -118,6 +118,9 @@ pub enum Backend {
     Gpu,
 }
 
+/// The widest board the festival deals; the device struct has to fit it.
+pub const MAX_BOARD: usize = 180;
+
 impl Backend {
     pub fn tag(&self) -> &'static str {
         match self {
@@ -297,51 +300,72 @@ fn read_cpu() -> Cpu {
     }
 }
 
+/// Every accelerator file name we are willing to load, most likely first.
+/// The library is optional: on a machine with no cuda toolkit the bot still
+/// runs, it just stays on the cpu. Names are listed for all platforms so a
+/// package built on one os still auto-detects a library dropped in on another.
+fn lib_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["forge_mc.dll", "libforge_mc.dll", "libforge_mc.so"]
+    } else if cfg!(target_os = "macos") {
+        vec!["libforge_mc.dylib", "forge_mc.dylib", "libforge_mc.so"]
+    } else {
+        vec!["libforge_mc.so", "forge_mc.so", "libforge_mc.dylib"]
+    }
+}
+
+/// Name shown in logs before a library is loaded.
+fn lib_default_name() -> &'static str {
+    lib_names()[0]
+}
+
+fn lib_dirs() -> Vec<PathBuf> {
+    let mut d: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(p) = exe.parent() {
+            d.push(p.to_path_buf());
+            d.push(p.join("cuda"));
+            if let Some(up) = p.parent() {
+                d.push(up.join("cuda"));
+            }
+        }
+    }
+    d.push(PathBuf::from("cuda"));
+    d.push(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/cuda")));
+    d
+}
+
 fn lib_candidates() -> Vec<PathBuf> {
-    let name = if cfg!(windows) {
-        "forge_mc.dll".to_string()
-    } else {
-        "libforge_mc.so".to_string()
-    };
-    let alt = if cfg!(windows) {
-        "libforge_mc.so".to_string()
-    } else {
-        "forge_mc.dll".to_string()
-    };
     let mut v: Vec<PathBuf> = Vec::new();
     if let Ok(p) = std::env::var("EMB_FORGE_CUDA_LIB") {
         if !p.trim().is_empty() {
             v.push(PathBuf::from(p));
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            v.push(d.join(&name));
-            v.push(d.join("cuda").join(&name));
-            if let Some(up) = d.parent() {
-                v.push(up.join("cuda").join(&name));
-            }
+    let dirs = lib_dirs();
+    for name in lib_names() {
+        for d in &dirs {
+            v.push(d.join(name));
         }
     }
-    v.push(PathBuf::from("cuda").join(&name));
-    v.push(PathBuf::from("cuda").join(&alt));
-    v.push(PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/cuda"
-    ))
-    .join(&name));
     v
 }
 
-fn open_cuda() -> Option<Cuda> {
+fn open_cuda() -> (Option<Cuda>, bool, Option<String>) {
+    let mut seen = false;
     for path in lib_candidates() {
         if !path.exists() {
             continue;
         }
+        seen = true;
         let handle = match dynlib::open(&path) {
             Some(h) => h,
             None => continue,
         };
+        let label = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| lib_default_name().to_string());
         unsafe {
             let d = dynlib::sym(handle, "forge_mc_devices");
             let e = dynlib::sym(handle, "forge_mc_eval");
@@ -352,26 +376,90 @@ fn open_cuda() -> Option<Cuda> {
                 continue;
             }
             let pr = dynlib::sym(handle, "forge_ev_prove");
-            return Some(Cuda {
-                handle,
-                devices: std::mem::transmute::<*mut c_void, DevicesFn>(d),
-                eval: std::mem::transmute::<*mut c_void, EvalFn>(e),
-                pack: std::mem::transmute::<*mut c_void, PackFn>(p),
-                size: std::mem::transmute::<*mut c_void, SizeFn>(s),
-                prove: if pr.is_null() {
-                    None
-                } else {
-                    Some(std::mem::transmute::<*mut c_void, ProveFn>(pr))
-                },
-            });
+            return (
+                Some(Cuda {
+                    handle,
+                    devices: std::mem::transmute::<*mut c_void, DevicesFn>(d),
+                    eval: std::mem::transmute::<*mut c_void, EvalFn>(e),
+                    pack: std::mem::transmute::<*mut c_void, PackFn>(p),
+                    size: std::mem::transmute::<*mut c_void, SizeFn>(s),
+                    prove: if pr.is_null() {
+                        None
+                    } else {
+                        Some(std::mem::transmute::<*mut c_void, ProveFn>(pr))
+                    },
+                }),
+                true,
+                Some(label),
+            );
         }
     }
-    None
+    (None, seen, None)
+}
+
+struct Probe {
+    cuda: Option<Cuda>,
+    seen: bool,
+    lib: Option<String>,
+}
+
+fn probe() -> &'static Probe {
+    static P: OnceLock<Probe> = OnceLock::new();
+    P.get_or_init(|| {
+        let (cuda, seen, lib) = open_cuda();
+        Probe { cuda, seen, lib }
+    })
+}
+
+/// Name of the accelerator file that actually loaded, or the one we looked for.
+fn lib_label() -> String {
+    probe()
+        .lib
+        .clone()
+        .unwrap_or_else(|| lib_default_name().to_string())
 }
 
 fn cuda() -> &'static Option<Cuda> {
-    static C: OnceLock<Option<Cuda>> = OnceLock::new();
-    C.get_or_init(open_cuda)
+    &probe().cuda
+}
+
+fn lib_seen() -> bool {
+    probe().seen
+}
+
+/// A device count is not enough: the device struct has to actually accept the
+/// biggest board this game deals, otherwise every eval silently falls back to
+/// the cpu while the log still claims the gpu is armed.
+fn cuda_pack_ok(c: &Cuda, n: usize) -> bool {
+    let stride = unsafe { (c.size)() };
+    if stride <= 0 {
+        return false;
+    }
+    let mut blob = vec![0u8; stride as usize];
+    let loc = vec![0i8; n];
+    let mut face = vec![-1i8; n];
+    for (i, f) in face.iter_mut().enumerate() {
+        *f = (i % 24) as i8;
+    }
+    let up = vec![0u64; n];
+    let empty: [i8; 0] = [];
+    let rc = unsafe {
+        (c.pack)(
+            blob.as_mut_ptr() as *mut c_void,
+            0,
+            n as c_int,
+            7,
+            2,
+            loc.as_ptr(),
+            face.as_ptr(),
+            up.as_ptr(),
+            empty.as_ptr(),
+            0,
+            empty.as_ptr(),
+            0,
+        )
+    };
+    rc == 0
 }
 
 fn gpu_name() -> Option<String> {
@@ -390,10 +478,7 @@ fn gpu_name() -> Option<String> {
     }
 }
 
-fn auto_threads(cpu: &Cpu, backend: Backend) -> usize {
-    if backend == Backend::Gpu {
-        return 1;
-    }
+fn auto_threads(cpu: &Cpu, _backend: Backend) -> usize {
     match cpu.logical {
         0 | 1 => 1,
         2 => 1,
@@ -419,29 +504,67 @@ fn detect() -> Hw {
         Some(c) => unsafe { (c.devices)() },
         None => -1,
     };
-    let gpu = if devices > 0 { gpu_name() } else { None };
+    let name = gpu_name();
+    let gpu = if devices > 0 { name.clone() } else { None };
     let forced = env_str("emb_forge_device");
     let want_gpu = match forced.as_deref() {
         Some("gpu") | Some("cuda") => true,
         Some("cpu") => false,
         _ => true,
     };
-    let (backend, note) = if devices > 0 && want_gpu {
+    let seen = lib_seen();
+    let pack_ok = match cuda {
+        Some(c) => cuda_pack_ok(c, MAX_BOARD),
+        None => false,
+    };
+    let (backend, note) = if devices > 0 && want_gpu && pack_ok {
         (
             Backend::Gpu,
-            format!("cuda device(s) {} armed via libforge_mc.so", devices),
+            format!(
+                "cuda device(s) {} armed via {}, device struct takes {} tiles",
+                devices,
+                lib_label(),
+                MAX_BOARD
+            ),
+        )
+    } else if devices > 0 && want_gpu {
+        (
+            Backend::Cpu,
+            format!(
+                "cuda device(s) {} found but {} rejects {} tiles, cpu fallback",
+                devices,
+                lib_label(),
+                MAX_BOARD
+            ),
         )
     } else if devices > 0 {
         (Backend::Cpu, "cuda present but forced cpu".to_string())
+    } else if cuda.is_none() && seen {
+        (
+            Backend::Cpu,
+            format!("{} present but not loadable, cpu fallback", lib_label()),
+        )
     } else if cuda.is_none() {
         (
             Backend::Cpu,
-            "no cuda runtime lib, cpu fallback".to_string(),
+            match &name {
+                Some(n) => format!(
+                    "gpu {} detected, cuda lib missing, cpu fallback",
+                    n.replace("NVIDIA ", "")
+                ),
+                None => "no cuda runtime lib, cpu fallback".to_string(),
+            },
         )
     } else {
         (
             Backend::Cpu,
-            "cuda runtime loaded but 0 devices, cpu fallback".to_string(),
+            match &name {
+                Some(n) => format!(
+                    "gpu {} detected, cuda driver error, cpu fallback",
+                    n.replace("NVIDIA ", "")
+                ),
+                None => "cuda lib loaded but 0 devices, cpu fallback".to_string(),
+            },
         )
     };
     let threads = env_usize("emb_forge_threads").unwrap_or_else(|| auto_threads(&cpu, backend));

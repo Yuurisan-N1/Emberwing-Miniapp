@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 
 #ifndef MAXN
-#define MAXN 64
+#define MAXN 256
 #endif
 #ifndef MAXSLOT
 #define MAXSLOT 8
@@ -145,34 +145,114 @@ static __device__ __forceinline__ void g_redeal(G *g) {
     for (int i = 0; i < no; i++) g->face[on[i]] = -1;
 }
 
+static __device__ __forceinline__ int g_ceil3(int c) { return ((c + 2) / 3) * 3; }
+
+// Candidate per-face totals for the hidden pool. Mirrors the host model: every
+// face's total is a multiple of three (each colour clears in triples), a face
+// holds two to four triples, and at most 24 colours are in play. `idx` selects
+// which candidate to materialise; the count of candidates is returned.
+static __device__ __forceinline__ int g_cands(const int *cnt, int obs, const int *keys,
+                                              int n, int want, signed char *tot) {
+    for (int i = 0; i < 64; i++) tot[i] = 0;
+    if (n % 3 != 0) return 0;
+    int triples = n / 3;
+    int ncand = 0;
+    for (int f = obs; f <= triples; f++) {
+        int base = triples / f, rem = triples % f;
+        int lo = base * 3, hi = (base + 1) * 3;
+        if (base < 2 || base > 3 || f > 24) continue;
+        if (lo < 3) continue;
+        int need = 0, ok = 1;
+        for (int i = 0; i < obs; i++) {
+            int mn = g_ceil3(cnt[keys[i]]);
+            if (mn > hi) { ok = 0; break; }
+            if (mn > lo) need++;
+        }
+        if (!ok || need > rem) continue;
+        if (ncand == want) {
+            signed char t[64];
+            for (int i = 0; i < 64; i++) t[i] = 0;
+            for (int i = 0; i < obs; i++) {
+                int mn = g_ceil3(cnt[keys[i]]);
+                int v = (i < rem) ? hi : lo;
+                if (v < mn) v = mn;
+                t[keys[i]] = (signed char)v;
+            }
+            int sum = 0;
+            for (int i = 0; i < obs; i++) sum += t[keys[i]];
+            int used = obs;
+            for (int lbl = 0; used < f && lbl < 64; lbl++) {
+                if (t[lbl] != 0) continue;
+                t[lbl] = (signed char)lo;
+                sum += lo;
+                used++;
+            }
+            if (sum == n) {
+                for (int i = 0; i < 64; i++) tot[i] = t[i];
+                return 1;
+            }
+        } else {
+            int sum = 0;
+            for (int i = 0; i < obs; i++) {
+                int mn = g_ceil3(cnt[keys[i]]);
+                int v = (i < rem) ? hi : lo;
+                if (v < mn) v = mn;
+                sum += v;
+            }
+            sum += lo * (f - obs);
+            if (sum == n) ncand++;
+        }
+    }
+    return ncand;
+}
+
+static __device__ __forceinline__ int g_ncand(const int *cnt, int obs, const int *keys, int n) {
+    signed char dummy[64];
+    return g_cands(cnt, obs, keys, n, -1, dummy);
+}
+
 static __device__ __forceinline__ void g_sample(G *g, unsigned long long *s) {
     int hid[MAXN], nh = 0;
     int cnt[64];
     for (int i = 0; i < 64; i++) cnt[i] = 0;
     for (int i = 0; i < g->n; i++) {
         g->truth[i] = g->face[i];
-        if (g->loc[i] != 0) { int f = g->face[i]; if (f >= 0) cnt[f]++; }
-        else if (g->face[i] >= 0) cnt[g->face[i]]++;
-        else hid[nh++] = i;
+        if (g->face[i] >= 0) cnt[g->face[i]]++;
+        else if (g->loc[i] == 0) hid[nh++] = i;
     }
     if (nh == 0) return;
-    int nf = 0;
-    for (int f = 0; f < 64; f++) if (cnt[f] > 0) nf++;
-    int per = (nf > 0 && g->n % nf == 0) ? g->n / nf : 0;
+    int keys[64], obs = 0;
+    for (int f = 0; f < 64; f++) if (cnt[f] > 0) keys[obs++] = f;
+    for (int i = 1; i < obs; i++) {
+        int k = keys[i], c = cnt[k], j = i - 1;
+        while (j >= 0 && cnt[keys[j]] < c) { keys[j + 1] = keys[j]; j--; }
+        keys[j + 1] = k;
+    }
+    int ncand = g_ncand(cnt, obs, keys, g->n);
+    signed char tot[64];
+    int have = 0;
+    if (ncand > 0) {
+        *s = *s * 6364136223846793005ULL + 1442695040888963407ULL;
+        int want = (int)((*s >> 33) % (unsigned long long)ncand);
+        have = g_cands(cnt, obs, keys, g->n, want, tot);
+    }
     signed char pool[MAXN];
     int np = 0;
-    if (per >= 3) {
-        for (int f = 0; f < 64 && np < MAXN; f++)
-            if (cnt[f] > 0) {
-                int left = per - cnt[f];
-                for (int k = 0; k < left && np < MAXN; k++) pool[np++] = (signed char)f;
-            }
+    if (have) {
+        for (int f = 0; f < 64; f++) {
+            int left = (int)tot[f] - cnt[f];
+            for (int k = 0; k < left && np < MAXN; k++) pool[np++] = (signed char)f;
+        }
     }
-    while (np < nh) pool[np++] = 0;
+    if (np < nh) {
+        int filler = obs > 0 ? keys[0] : 0;
+        while (np < nh && np < MAXN) pool[np++] = (signed char)filler;
+    }
+    np = nh;
     for (int i = np - 1; i > 0; i--) {
         *s = *s * 6364136223846793005ULL + 1442695040888963407ULL;
         int j = (int)((*s >> 33) % (unsigned long long)(i + 1));
-        signed char tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+        signed char t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
     for (int i = 0; i < nh; i++) g->truth[hid[i]] = pool[i];
 }

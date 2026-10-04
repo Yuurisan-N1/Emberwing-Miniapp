@@ -11,3 +11,6 @@
 /.github/__pycache__/
 *.pyc
 .github/workflows/build.yml
+cuda/*.so
+cuda/*.dll
+cuda/*.ptx
