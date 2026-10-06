@@ -38,7 +38,7 @@
 - Rust `1.70+` (includes `cargo`) -- only needed if building from source
 - Ruby `3.0+` -- only needed to run the downloader script
 - Git
-- CUDA Toolkit `12.x` -- optional, only needed to build the GPU backend for Forge
+- CUDA Toolkit `12.x` optional, only needed to build the GPU backend for Forge
 
 ---
 
@@ -86,7 +86,7 @@ cd Emberwing-Miniapp
 
 ### 1. Account (data.txt)
 
-Fill `data.txt` with your Telegram WebApp `initData`. This bot runs a single account -- only the first line is used:
+Fill `data.txt` with your Telegram WebApp `initData`. This bot runs a single account only the first line is used:
 
 ```
 user=%7B%22id%22...&hash=abc123
@@ -228,7 +228,7 @@ chmod +x emberwing-bot-linux-x86_64
 
 ### Option C - Downloader Script
 
-The downloader script fetches the correct binary directly from the Releases page for your platform. The binary is saved inside the `downloader/` folder. Ruby is required to run the script -- see how to install Ruby below.
+The downloader script fetches the correct binary directly from the Releases page for your platform. The binary is saved inside the `downloader/` folder. Ruby is required to run the script see how to install Ruby below.
 
 **Install Ruby:**
 
@@ -348,7 +348,7 @@ The bot runs all available hunt boss fights, clears active camps, fights availab
 The bot spends tickets on tavern rolls up to `max_rolls_per_cycle` per cycle. The `kind` setting controls which ticket type is spent. Remaining pity progress is logged when no tickets are available.
 
 ### Forge Festival Tile Puzzle
-The bot plays the Forge festival tile-matching puzzle automatically. For each available ticket, it starts a stage, reads the live board state and layout geometry, and plans moves using a Monte Carlo tree search. The planner samples configurable numbers of random rollouts per candidate move across a configurable thread pool, scoring each move by estimated win probability. On systems with a compatible NVIDIA GPU, the Monte Carlo sampling runs on the GPU for significantly higher throughput -- the bot detects the GPU at startup and reports whether the CUDA backend is active or whether it falls back to the CPU pool. If the bot gets stuck with no valid move and `buy_boosters` is enabled, it purchases a booster pack to unblock the board and continues. The bot resumes any interrupted live stage on startup before starting new ones. Up to `max_stages` stages are cleared per cycle. Available tickets including free and paid are counted and accrued passively between cycle checks.
+The bot plays the Forge festival tile-matching puzzle automatically. For each available ticket, it starts a stage, reads the live board state and layout geometry, and plans moves using a Monte Carlo tree search. The planner samples configurable numbers of random rollouts per candidate move across a configurable thread pool, scoring each move by estimated win probability. On systems with a compatible NVIDIA GPU, the Monte Carlo sampling runs on the GPU for significantly higher throughput the bot detects the GPU at startup and reports whether the CUDA backend is active or whether it falls back to the CPU pool. If the bot gets stuck with no valid move and `buy_boosters` is enabled, it purchases a booster pack to unblock the board and continues. The bot resumes any interrupted live stage on startup before starting new ones. Up to `max_stages` stages are cleared per cycle. Available tickets including free and paid are counted and accrued passively between cycle checks.
 
 ### GPU Backend (optional)
 To enable the GPU backend for the Forge puzzle solver, build the CUDA shared library first using the provided script. CUDA Toolkit 12.x and nvcc are required. The script auto-detects the installed GPU compute capability and compiles for all supported architectures:
